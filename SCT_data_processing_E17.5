@@ -1,0 +1,404 @@
+##BSTViewer圈选后的表达矩阵进行注释
+setwd("E:\\SCT\\mm_E17.5\\tmp")
+library(Seurat)
+library(tidyverse)
+library(Matrix)
+library(spacexr)
+library(ggplot2)
+library(ggpubr)
+library(gridExtra)
+library(reshape2)
+library(readr)
+library(config)
+library(gridExtra)
+library(png)
+library(patchwork)
+library(readxl)
+library(clustree)
+library(patchwork)
+library(RColorBrewer)
+library(colorRamp2)
+library(ComplexHeatmap)
+library(semla)
+library(ggforce)
+library(ggplot2)
+library(cowplot)
+source("E:\\SCT\\mm_P8\\CreateBmkObject.R")
+Rcpp::sourceCpp(code='
+#include <Rcpp.h>
+using namespace Rcpp;
+// [[Rcpp::export]]
+IntegerMatrix asMatrix(NumericVector rp,
+                       NumericVector cp,
+                       NumericVector z,
+                       int nrows,
+                       int ncols){
+  int k = z.size() ;
+  IntegerMatrix  mat(nrows, ncols);
+  for (int i = 0; i < k; i++){
+      mat(rp[i],cp[i]) = z[i];
+  }
+  return mat;
+}
+' )
+as_matrix <- function(mat){
+  
+  row_pos <- mat@i
+  col_pos <- findInterval(seq(mat@x)-1,mat@p[-1])
+  
+  tmp <- asMatrix(rp = row_pos, cp = col_pos, z = mat@x,
+                  nrows =  mat@Dim[1], ncols = mat@Dim[2])
+  
+  row.names(tmp) <- mat@Dimnames[[1]]
+  colnames(tmp) <- mat@Dimnames[[2]]
+  return(tmp)
+}
+##读入数据
+object1 <- CreateS1000Object(
+  matrix_path="E:\\SCT\\BSTViewer-V4.1.3.1\\E17.5\\output\\subdata\\L2_E17.5_L",
+  png_path="E:\\SCT\\BSTViewer-V4.1.3.1\\E17.5\\output\\he_roi_small.png",
+  spot_radius =1,
+  min.cells =5,min.features = 50)
+object1 <- NormalizeData(object1, normalization.method = "LogNormalize", scale.factor = 10000)
+object1 <- FindVariableFeatures(object1, selection.method = "vst", nfeatures = 2000)
+object1 <- ScaleData(object1,features = all.genes)
+object1 <- RunPCA(object=object1,pc.genes = VariableFeatures(object1))
+object1 <- FindNeighbors(object=object1, reduction = "pca",dims = 1:30,verbose = F)
+object1 <- FindClusters(object=object1, verbose = F,resolution = 1)
+object1 <- RunUMAP(object=object1, reduction = "pca",dims = 1:30)
+##细胞注释
+#注释需要用的的marker list
+pnas_marker <- read_xlsx("E:\\SCT\\Anotation\\PNAS_top50_gene.xlsx")
+HS_marker <- read_xlsx("E:\\SCT\\mm_E17.5\\P1_markers.xlsx")
+Adult_marker <- read_xlsx("E:\\SCT\\mm_2M\\adult_markers.xlsx")
+sc_top100 <- read.csv("E:\\SCT\\Anotation\\mmtop100_cluster_ident.csv")
+
+#根据结构特征初步注释
+SpatialDimPlot(object1, cells.highlight = CellsByIdentities(object = object1, idents = c(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)), facet.highlight = TRUE,cols.highlight = c('#0000E3','#EDEEEF'),ncol = 4
+               ,pt.size.factor = 20,alpha = c(0.5,2),stroke = 0.1,image.alpha = 0.1,crop = T)
+
+ids <- c("SS1","SS2","Fib","SS3","SS4","SS5","SS6","SS7","SS8",
+         "corti","Neuron","Out salcus","Stria")
+names(ids) <- levels(object1)
+object1 <- RenameIdents(object1,ids)
+DimPlot(object1, reduction = "umap", label = T,pt.size=1)+NoLegend()
+
+##进一步细化细胞注释
+SS8 <- subset(object1,idents=c("SS8"))
+seq <- seq(0.1, 2, by = 0.1)
+for(res in seq){
+  sce_all <- FindClusters(SS8, resolution = seq)
+}
+clustree(sce_all, prefix = 'Spatial_snn_res.') + coord_flip()
+SS8 <- FindClusters(SS8, verbose = FALSE,resolution =1)
+SS8 <- RunUMAP(SS8, dims = 1:14)
+DimPlot(SS8, reduction = "umap", label = T,pt.size=1)+NoLegend()
+SpatialDimPlot(SS8, cells.highlight = CellsByIdentities(object = SS8, idents = c(0,1,2,3,4,5)), facet.highlight = TRUE,cols.highlight = c('#0000E3','#EDEEEF'),ncol = 3
+               ,pt.size.factor = 20,alpha = c(0.5,2),stroke = 0.1,image.alpha = 0.1,crop = T)
+
+celltype_1 <- colnames(pnas_marker)
+for (i in celltype_1){
+  fe <- pnas_marker[i]
+  p1 <- DotPlot(SS8, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+for (i in colnames(sc_top100)){
+  fe <- sc_top100[i]
+  p1 <- DotPlot(SS8, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+ids <- c("Tympanic border","SS8","Reissner membrane","SS8")
+names(ids) <- levels(SS8)
+SS8 <- RenameIdents(SS8,ids)
+Idents(object1) <- Idents(SS8)
+DimPlot(object1, reduction = "umap", label = T,pt.size=1)+NoLegend()
+
+saveRDS(object1,"E_L2_ano.Rds")
+object1 <- readRDS("E_L2_ano.Rds")
+
+Fib <- subset(object1,idents = c("Fib"))
+seq <- seq(0.1, 2, by = 0.1)
+for(res in seq){
+  sce_all <- FindClusters(Fib, resolution = seq)
+}
+clustree(sce_all, prefix = 'Spatial_snn_res.') + coord_flip()
+Fib <- FindClusters(Fib, verbose = FALSE,resolution =0.6)
+Fib <- RunUMAP(Fib, dims = 1:14)
+DimPlot(Fib, reduction = "umap", label = T,pt.size=1)+NoLegend()
+SpatialDimPlot(Fib, cells.highlight = CellsByIdentities(object = Fib, idents = c(0,1,2)), facet.highlight = TRUE,cols.highlight = c('#0000E3','#EDEEEF'),ncol = 3
+               ,pt.size.factor = 20,alpha = c(0.5,2),stroke = 0.1,image.alpha = 0.1,crop = T)
+ids <- c("LW_Fib","SL_Fib","LW_Fib")
+names(ids) <- levels(Fib)
+Fib <- RenameIdents(Fib,ids)
+Idents(object1) <- Idents(Fib)
+DimPlot(object1, reduction = "umap", label = T,pt.size=1)+NoLegend()
+Fib <- subset(object1,idents = c("SL_Fib"))
+seq <- seq(0.1, 2, by = 0.1)
+for(res in seq){
+  sce_all <- FindClusters(Fib, resolution = seq)
+}
+clustree(sce_all, prefix = 'Spatial_snn_res.') + coord_flip()
+Fib <- FindClusters(Fib, verbose = FALSE,resolution =0.5)
+Fib <- RunUMAP(Fib, dims = 1:14)
+DimPlot(Fib, reduction = "umap", label = T,pt.size=1)+NoLegend()
+SpatialDimPlot(Fib, cells.highlight = CellsByIdentities(object = Fib, idents = c(0,1,2)), facet.highlight = TRUE,cols.highlight = c('#0000E3','#EDEEEF'),ncol = 3
+               ,pt.size.factor = 20,alpha = c(0.5,2),stroke = 0.1,image.alpha = 0.1,crop = T)
+
+celltype_1 <- colnames(pnas_marker)
+for (i in celltype_1){
+  fe <- pnas_marker[i]
+  p1 <- DotPlot(object1, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+for (i in colnames(sc_top100)){
+  fe <- sc_top100[i]
+  p1 <- DotPlot(object1, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+SpatialDimPlot(object1, cells.highlight = CellsByIdentities(object = object1, idents = levels(object1)), facet.highlight = TRUE,cols.highlight = c('#0000E3','#EDEEEF'),ncol = 3
+               ,pt.size.factor = 20,alpha = c(0.5,2),stroke = 0.1,image.alpha = 0.1,crop = T)
+
+SS5 <- subset(object1,idents = c("SS5"))
+for(res in seq){
+  sce_all <- FindClusters(SS5, resolution = seq)
+}
+clustree(sce_all, prefix = 'Spatial_snn_res.') + coord_flip()
+SS5 <- FindClusters(SS5, verbose = FALSE,resolution =1.2)
+SS5 <- RunUMAP(SS5, dims = 1:14)
+DimPlot(SS5, reduction = "umap", label = T,pt.size=1)+NoLegend()
+for (i in celltype_1){
+  fe <- pnas_marker[i]
+  p1 <- DotPlot(SS5, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+for (i in colnames(sc_top100)){
+  fe <- sc_top100[i]
+  p1 <- DotPlot(SS5, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+ids <- c("Endothelial cells","Macrophages","Neutrophils","NA","Endothelial cells","Neutrophils")
+names(ids) <- levels(SS5)
+SS5 <- RenameIdents(SS5,ids)
+Idents(object1) <- Idents(SS5)
+DimPlot(object1, reduction = "umap", label = T,pt.size=1)+NoLegend()
+
+SS <- subset(object1,idents = c("SS1","SS4","SS7"))
+ids <- c("Out structure","Out structure","Out structure")
+names(ids) <- levels(SS)
+SS <- RenameIdents(SS,ids)
+Idents(object1) <- Idents(SS)
+DimPlot(object1, reduction = "umap", label = T,pt.size=1)+NoLegend()
+
+SS2 <- subset(object1,idents = c("SS2"))
+for(res in seq){
+  sce_all <- FindClusters(SS2, resolution = seq)
+}
+clustree(sce_all, prefix = 'Spatial_snn_res.') + coord_flip()
+SS2 <- FindClusters(SS2, verbose = FALSE,resolution =0.5)
+SS2 <- RunUMAP(SS2, dims = 1:14)
+DimPlot(SS2, reduction = "umap", label = T,pt.size=1)+NoLegend()
+for (i in celltype_1){
+  fe <- pnas_marker[i]
+  p1 <- DotPlot(SS2, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+for (i in colnames(sc_top100)){
+  fe <- sc_top100[i]
+  p1 <- DotPlot(SS2, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+SpatialDimPlot(SS2, cells.highlight = CellsByIdentities(object = SS2, idents = c(0,1,2)), facet.highlight = TRUE,cols.highlight = c('#0000E3','#EDEEEF'),ncol = 5
+               ,pt.size.factor = 28,alpha = c(0.5,2),stroke = 0.1,image.alpha = 0.1,crop = T)
+
+ids <- c("Fibrocytes","Fibrocytes","Erythrocytes")
+names(ids) <- levels(SS2)
+SS2 <- RenameIdents(SS2,ids)
+Idents(object1) <- Idents(SS2)
+DimPlot(object1, reduction = "umap", label = T,pt.size=1)+NoLegend()
+
+
+SS6 <- subset(object1,idents = c("SS6"))
+for(res in seq){
+  sce_all <- FindClusters(SS6, resolution = seq)
+}
+clustree(sce_all, prefix = 'Spatial_snn_res.') + coord_flip()
+SS6 <- FindClusters(SS6, verbose = FALSE,resolution =0.7)
+SS6 <- RunUMAP(SS6, dims = 1:14)
+DimPlot(SS6, reduction = "umap", label = T,pt.size=1)+NoLegend()
+for (i in celltype_1){
+  fe <- pnas_marker[i]
+  p1 <- DotPlot(SS6, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+for (i in colnames(sc_top100)){
+  fe <- sc_top100[i]
+  p1 <- DotPlot(SS6, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+SpatialDimPlot(SS6, cells.highlight = CellsByIdentities(object = SS6, idents = c(0,1,2)), facet.highlight = TRUE,cols.highlight = c('#0000E3','#EDEEEF'),ncol = 5
+               ,pt.size.factor = 28,alpha = c(0.5,2),stroke = 0.1,image.alpha = 0.1,crop = T)
+
+ids <- c("Endothelial cells","Schwan","Schwan")
+names(ids) <- levels(SS6)
+SS6 <- RenameIdents(SS6,ids)
+Idents(object1) <- Idents(SS6)
+DimPlot(object1, reduction = "umap", label = T,pt.size=1)+NoLegend()
+
+SS3 <- subset(object1,idents = c("SS3"))
+for(res in seq){
+  sce_all <- FindClusters(SS3, resolution = seq)
+}
+clustree(sce_all, prefix = 'Spatial_snn_res.') + coord_flip()
+SS3 <- FindClusters(SS3, verbose = FALSE,resolution =0.6)
+SS3 <- RunUMAP(SS3, dims = 1:14)
+DimPlot(SS3, reduction = "umap", label = T,pt.size=1)+NoLegend()
+for (i in celltype_1){
+  fe <- pnas_marker[i]
+  p1 <- DotPlot(SS3, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+for (i in colnames(sc_top100)){
+  fe <- sc_top100[i]
+  p1 <- DotPlot(SS3, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+SpatialDimPlot(SS3, cells.highlight = CellsByIdentities(object = SS3, idents = c(0,1,2)), facet.highlight = TRUE,cols.highlight = c('#0000E3','#EDEEEF'),ncol = 5
+               ,pt.size.factor = 28,alpha = c(0.5,2),stroke = 0.1,image.alpha = 0.1,crop = T)
+
+ids <- c("Out structure2","Out structure2","Out structure2")
+names(ids) <- levels(SS3)
+SS3 <- RenameIdents(SS3,ids)
+Idents(object1) <- Idents(SS3)
+DimPlot(object1, reduction = "umap", label = T,pt.size=1)+NoLegend()
+levels(object1)
+Stria <- subset(object1,idents = c("Stria"))
+for(res in seq){
+  sce_all <- FindClusters(Stria, resolution = seq)
+}
+clustree(sce_all, prefix = 'Spatial_snn_res.') + coord_flip()
+Stria <- FindClusters(Stria, verbose = FALSE,resolution =0.8)
+Stria <- RunUMAP(Stria, dims = 1:14)
+DimPlot(Stria, reduction = "umap", label = T,pt.size=1)+NoLegend()
+for (i in celltype_1){
+  fe <- pnas_marker[i]
+  p1 <- DotPlot(Stria, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+for (i in colnames(sc_top100)){
+  fe <- sc_top100[i]
+  p1 <- DotPlot(Stria, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+SpatialDimPlot(Stria, cells.highlight = CellsByIdentities(object = Stria, idents = c(0,1,2)), facet.highlight = TRUE,cols.highlight = c('#0000E3','#EDEEEF'),ncol = 5
+               ,pt.size.factor = 28,alpha = c(0.5,2),stroke = 0.1,image.alpha = 0.1,crop = T)
+
+ids <- c("Marginal stria","Intermediate stria","Basal stria")
+names(ids) <- levels(Stria)
+Stria <- RenameIdents(Stria,ids)
+Idents(object1) <- Idents(Stria)
+DimPlot(object1, reduction = "umap", label = T,pt.size=1)+NoLegend()
+
+OSC <- subset(object1,idents = c("Out salcus"))
+for(res in seq){
+  sce_all <- FindClusters(OSC, resolution = seq)
+}
+clustree(sce_all, prefix = 'Spatial_snn_res.') + coord_flip()
+OSC <- FindClusters(OSC, verbose = FALSE,resolution =0.7)
+OSC <- RunUMAP(OSC, dims = 1:14)
+DimPlot(OSC, reduction = "umap", label = T,pt.size=1)+NoLegend()
+for (i in celltype_1){
+  fe <- pnas_marker[i]
+  p1 <- DotPlot(OSC, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+for (i in colnames(sc_top100)){
+  fe <- sc_top100[i]
+  p1 <- DotPlot(OSC, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+SpatialDimPlot(OSC, cells.highlight = CellsByIdentities(object = OSC, idents = c(0,1,2)), facet.highlight = TRUE,cols.highlight = c('#0000E3','#EDEEEF'),ncol = 5
+               ,pt.size.factor = 28,alpha = c(0.5,2),stroke = 0.1,image.alpha = 0.1,crop = T)
+
+corti <- subset(object1,idents = c("corti"))
+for(res in seq){
+  sce_all <- FindClusters(corti, resolution = seq)
+}
+clustree(sce_all, prefix = 'Spatial_snn_res.') + coord_flip()
+corti <- FindClusters(corti, verbose = FALSE,resolution =0.2)
+corti <- RunUMAP(corti, dims = 1:14)
+DimPlot(corti, reduction = "umap", label = T,pt.size=1)+NoLegend()
+for (i in celltype_1){
+  fe <- pnas_marker[i]
+  p1 <- DotPlot(corti, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+for (i in colnames(sc_top100)){
+  fe <- sc_top100[i]
+  p1 <- DotPlot(corti, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+for (i in colnames(HS_marker)){
+  fe <- HS_marker[i]
+  p1 <- DotPlot(corti, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+
+SpatialDimPlot(corti, cells.highlight = CellsByIdentities(object = corti, idents = c(0,1,2)), facet.highlight = TRUE,cols.highlight = c('#0000E3','#EDEEEF'),ncol = 5
+               ,pt.size.factor = 28,alpha = c(0.5,2),stroke = 0.1,image.alpha = 0.1,crop = T)
+
+ids <- c("Lateral_KO","HS","Interdental")
+names(ids) <- levels(corti)
+corti <- RenameIdents(corti,ids)
+
+HS <- subset(corti,idents = c("HS"))
+for(res in seq){
+  sce_all <- FindClusters(HS, resolution = seq)
+}
+clustree(sce_all, prefix = 'Spatial_snn_res.') + coord_flip()
+HS <- FindClusters(HS, verbose = FALSE,resolution =1.1)
+HS <- RunUMAP(HS, dims = 1:14)
+DimPlot(HS, reduction = "umap", label = T,pt.size=1)+NoLegend()
+for (i in celltype_1){
+  fe <- pnas_marker[i]
+  p1 <- DotPlot(HS, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+for (i in colnames(sc_top100)){
+  fe <- sc_top100[i]
+  p1 <- DotPlot(HS, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+for (i in colnames(HS_marker)){
+  fe <- HS_marker[i]
+  p1 <- DotPlot(HS, features = fe)+ RotatedAxis()+theme(legend.position = "none")+labs(title = i)
+  ggsave(paste( i, ".png", sep=""),width = 12,height = 10)
+}
+
+SpatialDimPlot(HS, cells.highlight = CellsByIdentities(object = HS, idents = c(0,1,2)), facet.highlight = TRUE,cols.highlight = c('#0000E3','#EDEEEF'),ncol = 5
+               ,pt.size.factor = 28,alpha = c(0.5,2),stroke = 0.1,image.alpha = 0.1,crop = T)
+FeaturePlot(HS,features = "Tbx2")+ RotatedAxis()+theme(legend.position = "none")
+
+ids <- c("Deiter_Pillar","OHC","IHC")
+names(ids) <- levels(HS)
+HS <- RenameIdents(HS,ids)
+Idents(corti) <- Idents(HS)
+
+Idents(object1) <- Idents(corti)
+DimPlot(object1, reduction = "umap", label = T,pt.size=1)+NoLegend()
+
+##规范细胞类型命名
+levels(object1)
+ids <- c("Out structure","Out structure",
+         "Erythrocytes","Macrophages","Endothelial cells","Neutrophils",
+         "Fibrocyte","SLg_Fibrocyte","SLb_Fibrocyte",
+         "Type I Neuron","Type II Neuron",
+         "Type I schwann cell" ,"Type II schwann cell","Type III schwann cell",
+         "Reissner's membrane",
+         "Basal cell","Marginal cell", "Intermediate cell",
+         "Interdental cell","Lateral Kolliker's organ","Out sulcus cell","Tympanic border cell",
+         "Outer hair cell","Inner hair cell",              
+         "Deiter cell_Pillar cell")
+names(ids) <- levels(object1)
+object1 <- RenameIdents(object1,ids)
+DimPlot(object1, reduction = "umap", label = T,pt.size=1)+NoLegend()
+saveRDS(object1,"E:\\SCT\\SCT_data\\E_L2_ano_noNA_new.Rds")
